@@ -1940,6 +1940,12 @@ import streamlit as st
 from docx import Document
 import io
 import random
+# PDFを作るためのライブラリ
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.units import mm
 
 # --- 🔐 パスワード認証機能 ---
 # ここで「金庫の中のパスワード」と「入力されたパスワード」を照合します
@@ -1948,112 +1954,157 @@ if password != st.secrets["MY_PASSWORD"]:
     st.warning("正しいパスワードを入力するとアプリが使えます。")
     st.stop()  # ここで処理を強制ストップ（これより下のコードは動きません）
 
+
 # --- 2. 画面の設定 ---
 st.title("単語・例文テスト作成アプリ 📝")
-st.write("範囲を指定して、問題数を選ぶとテストを作成します。")
+st.write("範囲と問題数を指定してください。PDFで出力します。")
 
-# 入力欄（3つ並べます）
+# 入力欄
 col1, col2, col3 = st.columns(3)
-
 with col1:
-    # 開始番号
     s = st.number_input('開始番号 (No.)', min_value=1, value=1)
 with col2:
-    # 終了番号
     f = st.number_input('終了番号 (No.)', min_value=1, value=len(leap1))
 with col3:
-    # ★追加：出題数（デフォルト20）
     q_num = st.number_input('出題数', min_value=1, value=20)
 
-# --- 3. 作成ボタンが押されたら実行 ---
-if st.button('テストを作成する！'):
+# --- 3. PDFを作成する関数 ---
+def create_pdf(questions, answers, start_num, end_num, actual_num):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
     
-    # エラーチェック
+    # ★フォントの登録
+    try:
+        pdfmetrics.registerFont(TTFont('Japanese', 'ipaexg.ttf'))
+        font_name = 'Japanese'
+    except:
+        st.error("エラー：'ipaexg.ttf' が見つかりません。GitHubにアップロードしましたか？")
+        font_name = 'Helvetica'
+
+    width, height = A4
+    c.setFont(font_name, 10.5) # フォントサイズ
+    
+    # --- タイトルの描画（Wordに合わせる）---
+    # 1行目：名前と範囲
+    title_text = f"名前:＿＿＿＿＿＿＿＿＿＿＿＿＿＿   範囲：No.{start_num}～{end_num} からランダムに{actual_num}問"
+    c.drawString(20*mm, height - 20*mm, title_text)
+    
+    # 2行目：注釈
+    c.drawString(20*mm, height - 28*mm, "答えの〔No.～〕は単語番号です。")
+    
+    # 描画開始位置
+    y_position = height - 45*mm
+    
+    for i in range(len(questions)):
+        # 改ページ処理
+        if y_position < 20*mm:
+            c.showPage()
+            c.setFont(font_name, 10.5)
+            y_position = height - 20*mm
+
+        q_text = questions[i]
+        
+        # 問題文（Qを削除して、番号: 全角スペース 問題文）
+        c.drawString(20*mm, y_position, f"{i+1}:　{q_text}")
+        
+        # 下線（問題文の下に引く）
+        c.drawString(20*mm, y_position - 8*mm, "＿＿" * 25) 
+        
+        # 次の問題へ（間隔を調整）
+        y_position -= 20*mm
+
+    c.save()
+    return buffer.getvalue()
+
+# 解答用PDF
+def create_answer_pdf(questions, answers, start_num, end_num, actual_num):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    
+    try:
+        pdfmetrics.registerFont(TTFont('Japanese', 'ipaexg.ttf'))
+        font_name = 'Japanese'
+    except:
+        font_name = 'Helvetica'
+
+    width, height = A4
+    c.setFont(font_name, 10.5)
+    
+    # タイトル
+    title_text = f"名前:＿＿＿＿＿＿＿＿＿＿＿＿＿＿   範囲：No.{start_num}～{end_num} からランダムに{actual_num}問"
+    c.drawString(20*mm, height - 20*mm, title_text)
+    c.drawString(20*mm, height - 28*mm, "答えの〔No.～〕は単語番号です。")
+    
+    y_position = height - 45*mm
+    
+    for i in range(len(questions)):
+        if y_position < 20*mm:
+            c.showPage()
+            c.setFont(font_name, 10.5)
+            y_position = height - 20*mm
+
+        q_text = questions[i]
+        a_text = answers[i]
+        
+        # 問題文
+        c.drawString(20*mm, y_position, f"{i+1}:　{q_text}")
+        # 答え
+        c.drawString(20*mm, y_position - 8*mm, f"      {a_text}")
+        
+        y_position -= 20*mm
+
+    c.save()
+    return buffer.getvalue()
+
+
+# --- 4. 作成処理 ---
+if st.button('PDFテストを作成する！'):
+    
     if s > f:
-        st.error("開始番号は終了番号より小さくしてください。")
+        st.error("範囲エラー：開始番号が終了番号より大きいです。")
         st.stop()
     
-    # 範囲データを抽出
     target_data = leap1[s-1 : f]
-    
-    # データがない場合
     if len(target_data) < 1:
-        st.error("指定された範囲のデータが見つかりません。")
+        st.error("データなし：指定された範囲にデータがありません。")
         st.stop()
 
-    # ★重要：出題数の調整
-    # 指定範囲のデータ数より、要求された出題数が多い場合は、あるだけ全部出す
     actual_q_num = min(q_num, len(target_data))
-    
-    # シャッフルして、必要な数だけ取り出す（ここがポイント！）
     random.shuffle(target_data)
     selected_data = target_data[:actual_q_num]
     
-    # 辞書に変換
     test_dict = dict(selected_data)
     questions = list(test_dict.keys())
     answers = list(test_dict.values())
     
-    # --- Wordファイル作成 ---
-    leap_file = Document()
-    leap_answer_file = Document()
+    # PDFを作成（関数に引数を渡す）
+    pdf_q = create_pdf(questions, answers, s, f, actual_q_num)
+    pdf_a = create_answer_pdf(questions, answers, s, f, actual_q_num)
     
-    # ヘッダー作成
-    header_text = f"名前:＿＿＿＿＿＿＿＿＿＿＿＿＿＿範囲：No.{s}～{f} からランダムに{actual_q_num}問\n答えの〔No.～〕は単語番号です。\n"
-    leap_file.add_paragraph(header_text)
-    leap_answer_file.add_paragraph(header_text)
+    # セッションステートに保存
+    st.session_state['pdf_q'] = pdf_q
+    st.session_state['pdf_a'] = pdf_a
+    st.session_state['suffix'] = f"{s}～{f}"
+    
+    st.success(f"PDF作成完了！({actual_q_num}問)")
 
-    for i in range(len(questions)):
-        q_text = questions[i]
-        a_text = answers[i]
-        
-        # 問題ファイル
-        leap_file.add_paragraph(
-            f"{i+1}:　{q_text}\n\n{'＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿'}"
-        )
-        # 解答ファイル
-        leap_answer_file.add_paragraph(
-            f"{i+1}:　{q_text}\n\n{a_text}"
-        )
-
-    # --- 保存処理 ---
-    bio_q = io.BytesIO()
-    leap_file.save(bio_q)
-    
-    bio_a = io.BytesIO()
-    leap_answer_file.save(bio_a)
-    
-    # ★重要：セッションステートに保存（これでボタンを押しても消えなくなります）
-    st.session_state['generated_q'] = bio_q.getvalue()
-    st.session_state['generated_a'] = bio_a.getvalue()
-    st.session_state['file_name_suffix'] = f"{s}～{f}"
-    
-    st.success(f"作成完了！ 範囲:No.{s}～{f} から {actual_q_num}問 作成しました。")
-
-# --- 4. ダウンロードボタンの表示 ---
-# セッションステートにデータがある時だけボタンを表示する
-if 'generated_q' in st.session_state:
-    
+# --- 5. ダウンロード ---
+if 'pdf_q' in st.session_state:
     st.write("---")
-    st.write("👇 ここからダウンロードできます")
-    
     col1, col2 = st.columns(2)
-    
-    suffix = st.session_state['file_name_suffix']
+    suffix = st.session_state['suffix']
     
     with col1:
         st.download_button(
-            label="📥 問題をダウンロード",
-            data=st.session_state['generated_q'],
-            file_name=f"LEAP_テスト{suffix}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            label="📄 問題PDFをDL",
+            data=st.session_state['pdf_q'],
+            file_name=f"LEAP_テスト{suffix}.pdf",
+            mime="application/pdf"
         )
     with col2:
         st.download_button(
-            label="📥 答えをダウンロード",
-            data=st.session_state['generated_a'],
-            file_name=f"LEAP_答え{suffix}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            label="📄 答えPDFをDL",
+            data=st.session_state['pdf_a'],
+            file_name=f"LEAP_答え{suffix}.pdf",
+            mime="application/pdf"
         )
-
-
